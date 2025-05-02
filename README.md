@@ -72,7 +72,6 @@ backend/
 ## Environment Variables
 
 - `PORT`: Server port (default: 3000)
-- `MONGODB_URI`: MongoDB connection string
 - `JWT_SECRET`: Secret key for JWT token generation
 
 ## Development
