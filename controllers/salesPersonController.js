@@ -35,7 +35,6 @@ salesPersonCtlr.view = async (req, res) =>{
           userId: req.user.id, 
           isDelete: false 
         }).lean();
-        
         // For each salesperson, find matching customers
         const results = await Promise.all(salesPersons.map(async (sp) => {
           const customers = await Customer.find({

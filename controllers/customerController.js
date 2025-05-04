@@ -5,9 +5,9 @@ const customerCtlr = {}
 
 customerCtlr.create = async (req, res) => {
     const { customerNo, customerName, city, salesPersonIds } = req.body;
-    const formattedSalesPersonIds = salesPersonIds.map(sp => ({
-      salesPersId: sp.salesPersId 
-    }));
+    // const formattedSalesPersonIds = salesPersonIds.map(sp => ({
+    //   salesPersId: sp.salesPersId 
+    // }));
 
     try {
         const newCustomer = await Customer.create({ 
@@ -15,7 +15,7 @@ customerCtlr.create = async (req, res) => {
           customerNo:customerNo.toLowerCase(),
           customerName:customerName.toLowerCase(), 
           city:city.toLowerCase(),  
-          salesPersonIds:formattedSalesPersonIds 
+          salesPersonIds:salesPersonIds
         });
         res.status(201).json(newCustomer);
     } catch (err) {
@@ -50,7 +50,7 @@ customerCtlr.getAllCustomers = async (req, res) => {
 
       const customersWithOrders = customers.map((cust) => {
         const customerOrders = orders.filter(order =>
-          order.customerIds.some(c => c.custId.toString() === cust._id.toString())
+          order.customerIds?.custId?.toString() === cust._id.toString()
         );
         return {
           ...cust,
@@ -67,14 +67,14 @@ customerCtlr.getAllCustomers = async (req, res) => {
 customerCtlr.update = async (req, res) => {
     const { id } = req.query        
     const { customerNo, customerName, city, salesPersonIds } = req.body;
-    const formattedSalesPersonIds = salesPersonIds.map(sp => ({
-      salesPersId: sp.salesPersId 
-    }));      
+    // const formattedSalesPersonIds = salesPersonIds.map(sp => ({
+    //   salesPersId: sp.salesPersId 
+    // }));      
     try {
       const customer = await Customer.findOneAndUpdate(
         { _id: id, userId: req.user.id },
-        { customerNo, customerName, city, salesPersonIds:formattedSalesPersonIds },
-        { new: true }   
+        { customerNo, customerName, city, salesPersonIds:salesPersonIds },
+        { new: true } 
       );
       res.json(customer);
     } catch (err) {
