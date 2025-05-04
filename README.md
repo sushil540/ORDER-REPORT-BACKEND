@@ -85,7 +85,3 @@ The project uses nodemon for development, which automatically restarts the serve
 - JWT-based authentication
 - CORS enabled for cross-origin requests
 - Input validation using validator package
-
-## License
-
-ISC 
