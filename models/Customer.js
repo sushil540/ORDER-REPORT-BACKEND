@@ -14,13 +14,13 @@ const CustomerSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  salesPersonIds: [{
+  salesPersonIds: {
     salesPersId:{
       type:mongoose.Schema.Types.ObjectId,
       ref:'SalesPerson',
       required: true
     }
-  }],
+  },
   userId:{
     type:mongoose.Schema.Types.ObjectId,
     ref:"User",

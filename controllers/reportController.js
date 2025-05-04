@@ -1,195 +1,161 @@
 import Order from "../models/Order.js";
-import PDFDocument from "pdfkit";
 import fs from "fs";
 import path from "path";
-import formatDateToDDMMYYYY from "../helpers/dateFormat.js";
+import { fileURLToPath } from 'url';
+import generatePdf from "../helpers/generatePdf.js";
+import { 
+  getSalesSummary, 
+  getSalesBySalesperson, 
+  getTopCustomers
+} from "../helpers/reportService.js  ";
+import { getOrdersSummary } from "../helpers/reportService.js";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+  
 const reportCtlr = {};
 
 reportCtlr.report = async (req, res) => {
   try {
-    const { fromDate, toDate, fields } = req.body;
-    if (!fromDate || !toDate || !fields || !fields.length) {
-      return res.status(400).json({ message: "Invalid input" });
+    const { fromDate, toDate, fields, reportType, timeGranularity } = req.body;
+    
+    const from = fromDate ? new Date(fromDate) : "";
+    const to = toDate ? new Date(toDate) : "";
+    if(to){
+      to.setHours(23, 59, 59, 999);
     }
+    
+    let reportData = [];
+    let updatedFields = [];
+    let detailedSummary = {}
 
-    const from = new Date(fromDate);
-    const to = new Date(toDate);
-    to.setHours(23, 59, 59, 999);
-
+    if(reportType && timeGranularity){
+      switch (reportType) {
+        case "orders_summary":
+          ({ reportData, updatedFields } = await getOrdersSummary(from, to, fields, timeGranularity));
+          break;
+        case "sales_by_salesperson":
+        ({ reportData, updatedFields, detailedSummary } = await getSalesBySalesperson(from, to, fields, timeGranularity));
+          break;
+        case "sales_summary":
+          ({ reportData, updatedFields } = await getSalesSummary(from, to, fields, timeGranularity));
+          break;
+        case "top_customers":
+          ({ reportData, updatedFields } = await getTopCustomers(from, to, fields, timeGranularity));
+          break;
+        default:
+          return null
+    }
+  } else if (fields.length > 0) {
+    // Only fetch orders with requested fields
     const projection = {};
     fields.forEach((field) => (projection[field.orderId] = 1));
 
-    const orders = await Order.find(
-      { orderDate: { $gte: from, $lte: to } },
-      projection
-    )
-      .populate({
-        path: "salesPersonIds.salesPersId",
-        model: "SalesPerson",
-        select: "salesPersonName",
-      })
-      .populate({
-        path: "customerIds.custId",
-        model: "Customer",
-        select: "customerName",
-      })
+    const orders = await Order.find({ orderDate: { $gte: from, $lte: to } }, projection)
+      .populate({ path: "salesPersonIds.salesPersId", model: "SalesPerson", select: "salesPersonName" })
+      .populate({ path: "customerIds.custId", model: "Customer", select: "customerName" })
       .lean();
 
-    const doc = new PDFDocument({ margin: 30, size: "A4" });
-    const fileName = `Order_Report_${Date.now()}.pdf`;
-    const filePath = path.resolve("reports", fileName);
+    reportData = orders;
+    updatedFields = [...fields];
+  }
+    const filePath = await generatePdf(
+        reportData, 
+        updatedFields, 
+        from, 
+        to, 
+        timeGranularity, 
+        reportType,
+        detailedSummary
+      );
 
-    fs.mkdirSync("reports", { recursive: true });
-    const stream = fs.createWriteStream(filePath);
-    doc.pipe(stream);
-
-    doc.fontSize(18).text("Order Report", {
-      align: "center",
-      underline: true,
-    });
-    doc.moveDown();
-
-    doc.fontSize(10).fillColor("black");
-    const today = new Date();
-    const formattedDate = formatDateToDDMMYYYY(today);
-    const formattedFromDate = formatDateToDDMMYYYY(from);
-    const formattedToDate = formatDateToDDMMYYYY(to);
-
-    doc.text(`Generated Date: ${formattedDate}`, doc.options.margin, 70, {
-      align: "right",
-    });
-    doc.text(`From: ${formattedFromDate}`, doc.options.margin, 85);
-    doc.text(`To: ${formattedToDate}`, doc.options.margin, 100);
-
-    doc.moveDown(3);
-    const printableFields = [
-      { orderId: "slNo", orderField: "Sl No" },
-      ...fields,
-    ];
-
-    const pageWidth = doc.page.width - doc.options.margin * 2;
-    const colWidth = pageWidth / printableFields.length;
-    const baseRowHeight = 30;
-    let y = doc.y;
-
-    // Header Row
-    printableFields.forEach((field, index) => {
-      const label = field.orderField || field.orderId;
-      doc
-        .rect(index * colWidth + doc.options.margin, y, colWidth, baseRowHeight)
-        .stroke();
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(10)
-        .text(label, index * colWidth + doc.options.margin + 5, y + 7, {
-          width: colWidth - 10,
-          align: "center",
-        });
-    });
-    y += baseRowHeight;
-
-    // Data Rows
-    orders.forEach((order, orderIndex) => {
-      const cellHeights = printableFields.map((field, index) => {
-        let value = "";
-        if (field.orderId === "slNo") {
-          value = orderIndex + 1;
-        } else if (field.orderId === "salesPersonIds") {
-          value = order.salesPersonIds
-            .map((sp) => sp.salesPersId?.salesPersonName.toUpperCase() || "N/A")
-            .join(", ");
-        } else if (field.orderId === "customerIds") {
-          value = order.customerIds
-            .map((c) => c.custId?.customerName.toUpperCase() || "N/A")
-            .join(", ");
-        } else {
-          const fieldValue = order[field.orderId];
-          value =
-            fieldValue instanceof Date
-              ? fieldValue.toISOString().split("T")[0]
-              : fieldValue ?? "";
-        }
-        return doc.heightOfString(String(value), { width: colWidth - 10 });
-      });
-
-      const rowHeight = Math.max(...cellHeights, baseRowHeight);
-
-      // Add new page if necessary
-      if (y + rowHeight > doc.page.height - doc.options.margin) {
-        doc.addPage();
-        y = doc.y;
-      }
-
-      printableFields.forEach((field, index) => {
-        let value = "";
-
-        if (field.orderId === "slNo") {
-          value = orderIndex + 1;
-        } else if (field.orderId === "salesPersonIds") {
-          value = order.salesPersonIds
-            .map((sp) => sp.salesPersId?.salesPersonName.toUpperCase() || "N/A")
-            .join(", ");
-        } else if (field.orderId === "customerIds") {
-          value = order.customerIds
-            .map((c) => c.custId?.customerName.toUpperCase() || "N/A")
-            .join(", ");
-        } else {
-          const fieldValue = order[field.orderId];
-          value =
-            fieldValue instanceof Date
-              ? fieldValue.toISOString().split("T")[0]
-              : fieldValue ?? "";
-        }
-
-        // Border
-        doc
-          .rect(index * colWidth + doc.options.margin, y, colWidth, rowHeight)
-          .stroke();
-
-        // Colored text
-        if (field.orderId === "salesPersonIds") {
-          doc.fillColor("green");
-        } else if (field.orderId === "customerIds") {
-          doc.fillColor("blue");
-        } else {
-          doc.fillColor("black");
-        }
-
-        doc
-          .font("Helvetica")
-          .fontSize(10)
-          .text(
-            String(value),
-            index * colWidth + doc.options.margin + 5,
-            y + 5,
-            {
-              width: colWidth - 10,
-              align: "left",
-            }
-          );
-      });
-
-      y += rowHeight;
-    });
-
-    doc.end();
-
-    stream.on("finish", () => {
-      res.setHeader("Content-Disposition", 'inline; filename="report.pdf"');
-      res.setHeader("Content-Type", "application/pdf");
-      res.sendFile(filePath, (err) => {
-        if (err) {
-          console.error("Download error:", err);
-          res.status(500).json({ message: "Failed to download PDF" });
-        }
+    res.setHeader("Content-Disposition", `inline; filename="report.pdf"`);
+    res.setHeader("Content-Type", "application/pdf");
+    res.sendFile(filePath, (err) => {
+      if (err) {
+        console.error("Download error:", err);
+        res.status(500).json({ message: "Failed to download file" });
+      } else {
         fs.unlinkSync(filePath);
-      });
+      }
     });
   } catch (err) {
-    console.error("PDF generation failed:", err);
+    console.error("Report generation failed:", err);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
+
+
+
+
+
+
+
+//------------------- don't touch---------------------------
+
+// reportCtlr.report = async (req, res) => {
+//   try {
+//     const { fromDate, toDate, fields} = req.body;
+//     if (!fromDate || !toDate || !fields || !fields.length) {
+//       return res.status(400).json({ message: "Invalid input" });
+//     }
+
+//     const from = new Date(fromDate);
+//     const to = new Date(toDate);
+//     to.setHours(23, 59, 59, 999);
+
+//     const projection = {};
+//     fields.forEach((field) => (projection[field.orderId] = 1));
+
+//     const orders = await Order.find({ orderDate: { $gte: from, $lte: to } }, projection)
+//       .populate({ path: "salesPersonIds.salesPersId", model: "SalesPerson", select: "salesPersonName" })
+//       .populate({ path: "customerIds.custId", model: "Customer", select: "customerName" })
+//       .lean();
+
+//     let filePath;
+//     filePath = await generatePdfReport(orders, fields, from, to);
+
+//     res.setHeader("Content-Disposition", `inline; filename="report.pdf"`);
+//     res.setHeader("Content-Type","application/pdf");
+//     res.sendFile(filePath, (err) => {
+//       if (err) {
+//         console.error("Download error:", err);
+//         res.status(500).json({ message: "Failed to download file" });
+//       }
+//       fs.unlinkSync(filePath);  
+//     });
+//   } catch (err) {
+//     console.error("Report generation failed:", err);
+//     res.status(500).json({ message: "Internal Server Error" });
+//   }
+// };
+
+
+// reportCtlr.download = async (req, res) => {
+//   try {
+//     const { format = "pdf" } = req.query; // 'csv' or 'pdf'
+//     const data = await Order.find({ isDelete: false }).populate("customerIds.custId salesPersonIds.salesPersId").lean();
+//     let filePath;
+//     if (format === 'csv') {
+//       filePath = generateCsvReport(data, fields);
+//     }
+
+//     if (format === 'pdf') {
+//       filePath = generatePdfReport(data, fields, from, to);
+//     }
+//     res.setHeader("Content-Disposition", `inline; filename="report.${format}"`);
+//     res.setHeader("Content-Type", format === "csv" ? "text/csv" : "application/pdf");
+//     res.sendFile(filePath, (err) => {
+//       if (err) {
+//         console.error("Download error:", err);
+//         res.status(500).json({ message: "Failed to download file" });
+//       }
+//       fs.unlinkSync(filePath);
+//     });
+//   } catch (error) {
+//     console.error(error);
+//     res.status(500).json({ message: 'Failed to generate report' });
+//   }
+// };
 
 export default reportCtlr;

@@ -4,20 +4,14 @@ const orderCtlr = {}
 
 orderCtlr.create = async (req, res) => {
     const { orderNo, orderDate, orderAmount, customerIds, salesPersonIds  } = req.body;
-    const formattedSalesPersonIds = salesPersonIds.map(sp => ({
-      salesPersId: sp.salesPersId
-    }));
-    const formattedCustomerIds = customerIds.map(sp => ({
-      custId: sp.custId
-    }));
     try {
         const newOrder = await Order.create({ 
           userId: req.user.id, 
           orderNo:orderNo.toLowerCase(), 
           orderDate:orderDate.toLowerCase(), 
           orderAmount:orderAmount, 
-          customerIds:formattedCustomerIds,
-          salesPersonIds:formattedSalesPersonIds
+          customerIds:customerIds,
+          salesPersonIds:salesPersonIds
         });
         res.status(201).json(newOrder);
     } catch (err) {
@@ -45,7 +39,8 @@ orderCtlr.getAllOrders = async (req, res) => {
       const orders = await Order.find({ userId: req.user.id, isDelete:false })
       .select("-userId")
       .populate("customerIds.custId", "customerName")
-      .populate("salesPersonIds.salesPersId", "salesPersonName"); 
+      .populate("salesPersonIds.salesPersId","salesPersonName")
+      .lean(); 
       res.json(orders);
     } catch (err) {
       res.status(400).json({ message: "Failed to fetch order" });
@@ -60,12 +55,7 @@ orderCtlr.update = async (req, res) => {
       orderAmount, 
       customerIds, 
       salesPersonIds } = req.body;
-    const formattedSalesPersonIds = salesPersonIds.map(sp => ({
-      salesPersId: sp.salesPersId
-    }));
-    const formattedCustomerIds = customerIds.map(sp => ({
-      custId: sp.custId
-    }));
+      
     try {
       const order = await Order.findOneAndUpdate(
         { _id: id, userId: req.user.id },
@@ -73,8 +63,8 @@ orderCtlr.update = async (req, res) => {
           orderNo: orderNo.toLowerCase(), 
           orderDate, 
           orderAmount, 
-          customerIds:formattedCustomerIds,
-          salesPersonIds:formattedSalesPersonIds
+          customerIds:customerIds,
+          salesPersonIds:salesPersonIds
          },
         { new: true }
       );

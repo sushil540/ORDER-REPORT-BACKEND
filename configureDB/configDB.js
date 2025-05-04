@@ -6,7 +6,7 @@ const configureDB = async () => {
         console.log("Connected to db")
     }catch(error){
         console.log("Error connecting to db", error)
-    }
+    }   
 }
 
 export default configureDB
